@@ -576,4 +576,149 @@ describe("StockOrderService - 库存同步集成测试", () => {
       expect(await sumStock(wh2.id, prod2.id)).toBe(25);
     });
   });
+
+  describe("场景6: 统一入口 - updateStatus(Completed) 与 complete 行为一致", () => {
+    beforeEach(async () => {
+      const inbound = await service.create({
+        type: OrderType.Inbound,
+        targetWarehouseId: wh1.id,
+        createdById: admin.id,
+        items: [{ productId: prod.id, shelfId: shelf1.id, quantity: 100, actualQuantity: 100 }]
+      });
+      await service.complete(inbound.id, admin.id);
+    });
+
+    it("updateStatus 改为 Completed 时入库单应正确增加库存", async () => {
+      const beforeStock = await sumStock(wh1.id, prod.id);
+
+      const order = await service.create({
+        type: OrderType.Inbound,
+        targetWarehouseId: wh1.id,
+        createdById: admin.id,
+        items: [{ productId: prod.id, shelfId: shelf1.id, quantity: 50, actualQuantity: 50 }]
+      });
+      await service.updateStatus(order.id, OrderStatus.Completed, admin.id);
+
+      const afterStock = await sumStock(wh1.id, prod.id);
+      expect(afterStock).toBe(beforeStock + 50);
+
+      const completed = await prisma.stockOrder.findUnique({ where: { id: order.id } });
+      expect(completed?.status).toBe(OrderStatus.Completed);
+      expect(completed?.approvedById).toBe(admin.id);
+    });
+
+    it("updateStatus 改为 Completed 时出库单应正确扣减库存", async () => {
+      const beforeStock = await sumStock(wh1.id, prod.id);
+      expect(beforeStock).toBe(100);
+
+      const order = await service.create({
+        type: OrderType.Outbound,
+        sourceWarehouseId: wh1.id,
+        createdById: admin.id,
+        items: [{ productId: prod.id, shelfId: shelf1.id, quantity: 30, actualQuantity: 30 }]
+      });
+      await service.updateStatus(order.id, OrderStatus.Completed, admin.id);
+
+      const afterStock = await sumStock(wh1.id, prod.id);
+      expect(afterStock).toBe(70);
+
+      const completed = await prisma.stockOrder.findUnique({ where: { id: order.id } });
+      expect(completed?.status).toBe(OrderStatus.Completed);
+    });
+
+    it("updateStatus 改为 Completed 时调拨单源减目标增", async () => {
+      const wh1Before = await sumStock(wh1.id, prod.id);
+      const wh2Before = await sumStock(wh2.id, prod.id);
+
+      const order = await service.create({
+        type: OrderType.Transfer,
+        sourceWarehouseId: wh1.id,
+        targetWarehouseId: wh2.id,
+        createdById: admin.id,
+        items: [{ productId: prod.id, quantity: 45, actualQuantity: 45 }]
+      });
+      await service.updateStatus(order.id, OrderStatus.Completed, admin.id);
+
+      const wh1After = await sumStock(wh1.id, prod.id);
+      const wh2After = await sumStock(wh2.id, prod.id);
+      expect(wh1After).toBe(wh1Before - 45);
+      expect(wh2After).toBe(wh2Before + 45);
+    });
+
+    it("updateStatus 改为 Completed 时库存不足应回滚", async () => {
+      const beforeStock = await sumStock(wh1.id, prod.id);
+
+      const order = await service.create({
+        type: OrderType.Outbound,
+        sourceWarehouseId: wh1.id,
+        createdById: admin.id,
+        items: [{ productId: prod.id, quantity: 9999, actualQuantity: 9999 }]
+      });
+
+      await expect(
+        service.updateStatus(order.id, OrderStatus.Completed, admin.id)
+      ).rejects.toThrow(/库存不足/);
+
+      const afterStock = await sumStock(wh1.id, prod.id);
+      expect(afterStock).toBe(beforeStock);
+
+      const notCompleted = await prisma.stockOrder.findUnique({ where: { id: order.id } });
+      expect(notCompleted?.status).not.toBe(OrderStatus.Completed);
+    });
+
+    it("updateStatus 非 Completed 状态不触发库存变化", async () => {
+      const beforeStock = await sumStock(wh1.id, prod.id);
+
+      const order = await service.create({
+        type: OrderType.Outbound,
+        sourceWarehouseId: wh1.id,
+        createdById: admin.id,
+        items: [{ productId: prod.id, quantity: 20, actualQuantity: 20 }]
+      });
+
+      await service.updateStatus(order.id, OrderStatus.Submitted, admin.id);
+      expect(await sumStock(wh1.id, prod.id)).toBe(beforeStock);
+
+      await service.updateStatus(order.id, OrderStatus.Processing, admin.id);
+      expect(await sumStock(wh1.id, prod.id)).toBe(beforeStock);
+
+      const submitted = await prisma.stockOrder.findUnique({ where: { id: order.id } });
+      expect(submitted?.status).toBe(OrderStatus.Processing);
+    });
+
+    it("updateStatus(Completed) 与 complete 结果等价", async () => {
+      const orderA = await service.create({
+        type: OrderType.Outbound,
+        sourceWarehouseId: wh1.id,
+        createdById: admin.id,
+        items: [{ productId: prod.id, quantity: 10, actualQuantity: 10 }]
+      });
+      await service.complete(orderA.id, admin.id);
+      const stockAfterA = await sumStock(wh1.id, prod.id);
+
+      await clearTestData();
+      const inbound = await service.create({
+        type: OrderType.Inbound,
+        targetWarehouseId: wh1.id,
+        createdById: admin.id,
+        items: [{ productId: prod.id, shelfId: shelf1.id, quantity: 100, actualQuantity: 100 }]
+      });
+      await service.complete(inbound.id, admin.id);
+
+      const orderB = await service.create({
+        type: OrderType.Outbound,
+        sourceWarehouseId: wh1.id,
+        createdById: admin.id,
+        items: [{ productId: prod.id, quantity: 10, actualQuantity: 10 }]
+      });
+      await service.updateStatus(orderB.id, OrderStatus.Completed, admin.id);
+      const stockAfterB = await sumStock(wh1.id, prod.id);
+
+      expect(stockAfterB).toBe(stockAfterA);
+
+      const recA = await prisma.stockOrder.findUnique({ where: { id: orderA.id } });
+      const recB = await prisma.stockOrder.findUnique({ where: { id: orderB.id } });
+      expect(recA?.status).toBe(recB?.status);
+    });
+  });
 });

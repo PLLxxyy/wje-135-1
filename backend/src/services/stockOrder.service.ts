@@ -68,10 +68,13 @@ export class StockOrderService {
   }
 
   async updateStatus(id: string, status: OrderStatus, approverId?: string) {
+    if (status === OrderStatus.Completed) {
+      return this.complete(id, approverId);
+    }
     await this.detail(id);
     return prisma.stockOrder.update({
       where: { id },
-      data: { status, approvedById: status === OrderStatus.Completed ? approverId : undefined },
+      data: { status },
       include: { items: true }
     });
   }

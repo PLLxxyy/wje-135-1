@@ -11,8 +11,8 @@
     "prisma:push": "prisma db push --schema src/prisma/schema.prisma",
     "seed": "ts-node src/prisma/seeds/seed.ts",
     "seed:prod": "node dist/prisma/seeds/seed.js",
-    "test": "jest --forceExit --detectOpenHandles",
-    "test:watch": "jest --watch"
+    "test": "jest --forceExit --detectOpenHandles --runInBand",
+    "test:watch": "jest --watch --runInBand"
   },
   "dependencies": {
     "@prisma/client": "^5.22.0",
