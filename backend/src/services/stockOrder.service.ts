@@ -4,6 +4,11 @@ import { OperationType, OrderStatus, OrderType } from "../types/enums";
 import { generateOrderNumber } from "../utils/orderNumber";
 import { BusinessError } from "../utils/response";
 
+type PrismaTx = Omit<
+  typeof prisma,
+  "$connect" | "$disconnect" | "$on" | "$transaction" | "$use" | "$extends"
+>;
+
 export class StockOrderService {
   async list(type?: OrderType) {
     return prisma.stockOrder.findMany({
@@ -93,6 +98,46 @@ export class StockOrderService {
               lastOperationType: OperationType.Inbound
             }
           });
+        } else if (order.type === OrderType.Outbound) {
+          if (!order.sourceWarehouseId) {
+            throw new BusinessError("出库单缺少源仓库");
+          }
+          await this.consumeStock(
+            tx,
+            item.productId,
+            order.sourceWarehouseId,
+            item.shelfId,
+            item.actualQuantity ?? item.quantity,
+            order.id,
+            OperationType.Outbound
+          );
+        } else if (order.type === OrderType.Transfer) {
+          if (!order.sourceWarehouseId) {
+            throw new BusinessError("调拨单缺少源仓库");
+          }
+          if (!order.targetWarehouseId) {
+            throw new BusinessError("调拨单缺少目标仓库");
+          }
+          const transferQuantity = item.actualQuantity ?? item.quantity;
+          await this.consumeStock(
+            tx,
+            item.productId,
+            order.sourceWarehouseId,
+            item.shelfId,
+            transferQuantity,
+            order.id,
+            OperationType.Transfer
+          );
+          await tx.stockRecord.create({
+            data: {
+              productId: item.productId,
+              warehouseId: order.targetWarehouseId,
+              batchNo: order.orderNo,
+              quantity: transferQuantity,
+              inboundDate: new Date(),
+              lastOperationType: OperationType.Transfer
+            }
+          });
         }
       }
 
@@ -113,6 +158,57 @@ export class StockOrderService {
         }
       });
       return updated;
+    });
+  }
+
+  private async consumeStock(
+    tx: PrismaTx,
+    productId: string,
+    warehouseId: string,
+    shelfId: string | undefined | null,
+    quantity: number,
+    orderId: string,
+    operationType: OperationType
+  ) {
+    const records = await tx.stockRecord.findMany({
+      where: {
+        productId,
+        warehouseId,
+        ...(shelfId ? { shelfId } : {}),
+        quantity: { gt: 0 }
+      },
+      orderBy: { inboundDate: "asc" }
+    });
+    const totalAvailable = records.reduce((sum, r) => sum + r.quantity, 0);
+    if (totalAvailable < quantity) {
+      const product = await tx.product.findUnique({ where: { id: productId } });
+      throw new BusinessError(
+        `商品「${product?.name ?? productId}」库存不足，可用: ${totalAvailable}，需要: ${quantity}`
+      );
+    }
+    let remaining = quantity;
+    for (const record of records) {
+      if (remaining <= 0) break;
+      const deduct = Math.min(record.quantity, remaining);
+      await tx.stockRecord.update({
+        where: { id: record.id },
+        data: {
+          quantity: record.quantity - deduct,
+          lastOperationType: operationType,
+          lastOperationAt: new Date()
+        }
+      });
+      remaining -= deduct;
+    }
+    await tx.operationLog.create({
+      data: {
+        operationType,
+        entityType: "StockRecord",
+        orderId,
+        productId,
+        warehouseId,
+        remark: `${operationType === OperationType.Outbound ? "出库" : "调拨出库"}扣减 ${quantity}`
+      }
     });
   }
 }
