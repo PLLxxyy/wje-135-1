@@ -13,21 +13,18 @@ async function clearTestData() {
   ]);
 }
 
-async function createTestAdmin() {
+async function ensureBaseData() {
   const role = await prisma.role.upsert({
     where: { name: UserRole.Admin },
     update: {},
     create: { name: UserRole.Admin, displayName: "系统管理员" }
   });
-  return prisma.user.upsert({
+  const admin = await prisma.user.upsert({
     where: { username: "test-admin" },
     update: {},
     create: { username: "test-admin", displayName: "测试管理员", roleId: role.id }
   });
-}
 
-async function createTestWarehouses() {
-  const admin = await createTestAdmin();
   const wh1 = await prisma.warehouse.upsert({
     where: { code: "TEST-WH-1" },
     update: {},
@@ -37,10 +34,8 @@ async function createTestWarehouses() {
       address: "测试地址1",
       area: 1000,
       managerId: admin.id,
-      contactPhone: "13800000001",
-      shelves: { create: [{ shelfCode: "T1-A-01", levels: 3, columns: 5, capacity: 500 }] }
-    },
-    include: { shelves: true }
+      contactPhone: "13800000001"
+    }
   });
   const wh2 = await prisma.warehouse.upsert({
     where: { code: "TEST-WH-2" },
@@ -51,20 +46,27 @@ async function createTestWarehouses() {
       address: "测试地址2",
       area: 800,
       managerId: admin.id,
-      contactPhone: "13800000002",
-      shelves: { create: [{ shelfCode: "T2-A-01", levels: 3, columns: 5, capacity: 500 }] }
-    },
-    include: { shelves: true }
+      contactPhone: "13800000002"
+    }
   });
-  return { wh1, wh2, admin };
-}
 
-async function createTestCategoryAndProduct() {
+  const shelf1 = await prisma.shelf.upsert({
+    where: { warehouseId_shelfCode: { warehouseId: wh1.id, shelfCode: "T1-A-01" } },
+    update: {},
+    create: { warehouseId: wh1.id, shelfCode: "T1-A-01", levels: 3, columns: 5, capacity: 500 }
+  });
+  const shelf2 = await prisma.shelf.upsert({
+    where: { warehouseId_shelfCode: { warehouseId: wh2.id, shelfCode: "T2-A-01" } },
+    update: {},
+    create: { warehouseId: wh2.id, shelfCode: "T2-A-01", levels: 3, columns: 5, capacity: 500 }
+  });
+
   const cat = await prisma.category.upsert({
     where: { id: "cat-test" },
     update: {},
     create: { id: "cat-test", name: "测试分类", sort: 99 }
   });
+
   const prod = await prisma.product.upsert({
     where: { sku: "TEST-SKU-001" },
     update: {},
@@ -82,7 +84,26 @@ async function createTestCategoryAndProduct() {
       price: 10
     }
   });
-  return { cat, prod };
+
+  const prod2 = await prisma.product.upsert({
+    where: { sku: "TEST-SKU-002" },
+    update: {},
+    create: {
+      name: "测试商品B",
+      sku: "TEST-SKU-002",
+      categoryId: cat.id,
+      spec: "规格B",
+      unit: "件",
+      weight: 0.2,
+      volume: 0.002,
+      barcode: "TEST000000002",
+      minStock: 5,
+      maxStock: 500,
+      price: 20
+    }
+  });
+
+  return { wh1, wh2, admin, shelf1, shelf2, prod, prod2 };
 }
 
 async function sumStock(warehouseId: string, productId: string): Promise<number> {
@@ -92,18 +113,28 @@ async function sumStock(warehouseId: string, productId: string): Promise<number>
   return records.reduce((s, r) => s + r.quantity, 0);
 }
 
+async function seedInbound(warehouseId: string, shelfId: string, productId: string, quantity: number, createdById: string) {
+  const order = await service.create({
+    type: OrderType.Inbound,
+    targetWarehouseId: warehouseId,
+    createdById,
+    items: [{ productId, shelfId, quantity, actualQuantity: quantity }]
+  });
+  await service.complete(order.id, createdById);
+}
+
 describe("StockOrderService - 库存同步集成测试", () => {
-  let wh1: any, wh2: any, admin: any, prod: any, shelf1: any, shelf2: any;
+  let wh1: any, wh2: any, admin: any, prod: any, prod2: any, shelf1: any, shelf2: any;
 
   beforeAll(async () => {
-    const whs = await createTestWarehouses();
-    wh1 = whs.wh1;
-    wh2 = whs.wh2;
-    admin = whs.admin;
-    shelf1 = wh1.shelves[0];
-    shelf2 = wh2.shelves[0];
-    const { prod: p } = await createTestCategoryAndProduct();
-    prod = p;
+    const base = await ensureBaseData();
+    wh1 = base.wh1;
+    wh2 = base.wh2;
+    admin = base.admin;
+    shelf1 = base.shelf1;
+    shelf2 = base.shelf2;
+    prod = base.prod;
+    prod2 = base.prod2;
   });
 
   beforeEach(async () => {
@@ -167,13 +198,7 @@ describe("StockOrderService - 库存同步集成测试", () => {
 
   describe("场景2: 出库单完成 - 扣减库存", () => {
     beforeEach(async () => {
-      const inbound = await service.create({
-        type: OrderType.Inbound,
-        targetWarehouseId: wh1.id,
-        createdById: admin.id,
-        items: [{ productId: prod.id, shelfId: shelf1.id, quantity: 200, actualQuantity: 200 }]
-      });
-      await service.complete(inbound.id, admin.id);
+      await seedInbound(wh1.id, shelf1.id, prod.id, 200, admin.id);
     });
 
     it("出库单完成后应扣减源仓库库存", async () => {
@@ -243,13 +268,7 @@ describe("StockOrderService - 库存同步集成测试", () => {
     });
 
     it("FIFO策略: 先入库的批次优先被出库", async () => {
-      const inbound2 = await service.create({
-        type: OrderType.Inbound,
-        targetWarehouseId: wh1.id,
-        createdById: admin.id,
-        items: [{ productId: prod.id, shelfId: shelf1.id, quantity: 100, actualQuantity: 100 }]
-      });
-      await service.complete(inbound2.id, admin.id);
+      await seedInbound(wh1.id, shelf1.id, prod.id, 100, admin.id);
 
       const recordsBefore = await prisma.stockRecord.findMany({
         where: { warehouseId: wh1.id, productId: prod.id },
@@ -278,13 +297,7 @@ describe("StockOrderService - 库存同步集成测试", () => {
 
   describe("场景3: 调拨单完成 - 源仓扣减、目标仓增加", () => {
     beforeEach(async () => {
-      const inbound = await service.create({
-        type: OrderType.Inbound,
-        targetWarehouseId: wh1.id,
-        createdById: admin.id,
-        items: [{ productId: prod.id, shelfId: shelf1.id, quantity: 150, actualQuantity: 150 }]
-      });
-      await service.complete(inbound.id, admin.id);
+      await seedInbound(wh1.id, shelf1.id, prod.id, 150, admin.id);
     });
 
     it("调拨单完成后源仓扣减、目标仓增加", async () => {
@@ -397,13 +410,7 @@ describe("StockOrderService - 库存同步集成测试", () => {
 
   describe("场景4: 事务与完整性", () => {
     beforeEach(async () => {
-      const inbound = await service.create({
-        type: OrderType.Inbound,
-        targetWarehouseId: wh1.id,
-        createdById: admin.id,
-        items: [{ productId: prod.id, shelfId: shelf1.id, quantity: 100, actualQuantity: 100 }]
-      });
-      await service.complete(inbound.id, admin.id);
+      await seedInbound(wh1.id, shelf1.id, prod.id, 100, admin.id);
     });
 
     it("单据完成时不更新其他仓库库存", async () => {
@@ -478,40 +485,9 @@ describe("StockOrderService - 库存同步集成测试", () => {
   });
 
   describe("场景5: 多商品混合单据", () => {
-    let prod2: any;
-
-    beforeAll(async () => {
-      const p = await prisma.product.upsert({
-        where: { sku: "TEST-SKU-002" },
-        update: {},
-        create: {
-          name: "测试商品B",
-          sku: "TEST-SKU-002",
-          categoryId: "cat-test",
-          spec: "规格B",
-          unit: "件",
-          weight: 0.2,
-          volume: 0.002,
-          barcode: "TEST000000002",
-          minStock: 5,
-          maxStock: 500,
-          price: 20
-        }
-      });
-      prod2 = p;
-    });
-
     beforeEach(async () => {
-      const inbound1 = await service.create({
-        type: OrderType.Inbound,
-        targetWarehouseId: wh1.id,
-        createdById: admin.id,
-        items: [
-          { productId: prod.id, shelfId: shelf1.id, quantity: 100, actualQuantity: 100 },
-          { productId: prod2.id, shelfId: shelf1.id, quantity: 50, actualQuantity: 50 }
-        ]
-      });
-      await service.complete(inbound1.id, admin.id);
+      await seedInbound(wh1.id, shelf1.id, prod.id, 100, admin.id);
+      await seedInbound(wh1.id, shelf1.id, prod2.id, 50, admin.id);
     });
 
     it("出库单多商品均正确扣减", async () => {
@@ -579,13 +555,7 @@ describe("StockOrderService - 库存同步集成测试", () => {
 
   describe("场景6: 统一入口 - updateStatus(Completed) 与 complete 行为一致", () => {
     beforeEach(async () => {
-      const inbound = await service.create({
-        type: OrderType.Inbound,
-        targetWarehouseId: wh1.id,
-        createdById: admin.id,
-        items: [{ productId: prod.id, shelfId: shelf1.id, quantity: 100, actualQuantity: 100 }]
-      });
-      await service.complete(inbound.id, admin.id);
+      await seedInbound(wh1.id, shelf1.id, prod.id, 100, admin.id);
     });
 
     it("updateStatus 改为 Completed 时入库单应正确增加库存", async () => {
@@ -597,12 +567,13 @@ describe("StockOrderService - 库存同步集成测试", () => {
         createdById: admin.id,
         items: [{ productId: prod.id, shelfId: shelf1.id, quantity: 50, actualQuantity: 50 }]
       });
-      await service.updateStatus(order.id, OrderStatus.Completed, admin.id);
+      const orderId = order.id;
+      await service.updateStatus(orderId, OrderStatus.Completed, admin.id);
 
       const afterStock = await sumStock(wh1.id, prod.id);
       expect(afterStock).toBe(beforeStock + 50);
 
-      const completed = await prisma.stockOrder.findUnique({ where: { id: order.id } });
+      const completed = await prisma.stockOrder.findUnique({ where: { id: orderId } });
       expect(completed?.status).toBe(OrderStatus.Completed);
       expect(completed?.approvedById).toBe(admin.id);
     });
@@ -617,12 +588,13 @@ describe("StockOrderService - 库存同步集成测试", () => {
         createdById: admin.id,
         items: [{ productId: prod.id, shelfId: shelf1.id, quantity: 30, actualQuantity: 30 }]
       });
-      await service.updateStatus(order.id, OrderStatus.Completed, admin.id);
+      const orderId = order.id;
+      await service.updateStatus(orderId, OrderStatus.Completed, admin.id);
 
       const afterStock = await sumStock(wh1.id, prod.id);
       expect(afterStock).toBe(70);
 
-      const completed = await prisma.stockOrder.findUnique({ where: { id: order.id } });
+      const completed = await prisma.stockOrder.findUnique({ where: { id: orderId } });
       expect(completed?.status).toBe(OrderStatus.Completed);
     });
 
@@ -637,7 +609,8 @@ describe("StockOrderService - 库存同步集成测试", () => {
         createdById: admin.id,
         items: [{ productId: prod.id, quantity: 45, actualQuantity: 45 }]
       });
-      await service.updateStatus(order.id, OrderStatus.Completed, admin.id);
+      const orderId = order.id;
+      await service.updateStatus(orderId, OrderStatus.Completed, admin.id);
 
       const wh1After = await sumStock(wh1.id, prod.id);
       const wh2After = await sumStock(wh2.id, prod.id);
@@ -654,15 +627,16 @@ describe("StockOrderService - 库存同步集成测试", () => {
         createdById: admin.id,
         items: [{ productId: prod.id, quantity: 9999, actualQuantity: 9999 }]
       });
+      const orderId = order.id;
 
       await expect(
-        service.updateStatus(order.id, OrderStatus.Completed, admin.id)
+        service.updateStatus(orderId, OrderStatus.Completed, admin.id)
       ).rejects.toThrow(/库存不足/);
 
       const afterStock = await sumStock(wh1.id, prod.id);
       expect(afterStock).toBe(beforeStock);
 
-      const notCompleted = await prisma.stockOrder.findUnique({ where: { id: order.id } });
+      const notCompleted = await prisma.stockOrder.findUnique({ where: { id: orderId } });
       expect(notCompleted?.status).not.toBe(OrderStatus.Completed);
     });
 
@@ -675,14 +649,15 @@ describe("StockOrderService - 库存同步集成测试", () => {
         createdById: admin.id,
         items: [{ productId: prod.id, quantity: 20, actualQuantity: 20 }]
       });
+      const orderId = order.id;
 
-      await service.updateStatus(order.id, OrderStatus.Submitted, admin.id);
+      await service.updateStatus(orderId, OrderStatus.Submitted, admin.id);
       expect(await sumStock(wh1.id, prod.id)).toBe(beforeStock);
 
-      await service.updateStatus(order.id, OrderStatus.Processing, admin.id);
+      await service.updateStatus(orderId, OrderStatus.Processing, admin.id);
       expect(await sumStock(wh1.id, prod.id)).toBe(beforeStock);
 
-      const submitted = await prisma.stockOrder.findUnique({ where: { id: order.id } });
+      const submitted = await prisma.stockOrder.findUnique({ where: { id: orderId } });
       expect(submitted?.status).toBe(OrderStatus.Processing);
     });
 
@@ -695,15 +670,10 @@ describe("StockOrderService - 库存同步集成测试", () => {
       });
       await service.complete(orderA.id, admin.id);
       const stockAfterA = await sumStock(wh1.id, prod.id);
+      const statusA = (await prisma.stockOrder.findUnique({ where: { id: orderA.id } }))?.status;
 
       await clearTestData();
-      const inbound = await service.create({
-        type: OrderType.Inbound,
-        targetWarehouseId: wh1.id,
-        createdById: admin.id,
-        items: [{ productId: prod.id, shelfId: shelf1.id, quantity: 100, actualQuantity: 100 }]
-      });
-      await service.complete(inbound.id, admin.id);
+      await seedInbound(wh1.id, shelf1.id, prod.id, 100, admin.id);
 
       const orderB = await service.create({
         type: OrderType.Outbound,
@@ -713,12 +683,10 @@ describe("StockOrderService - 库存同步集成测试", () => {
       });
       await service.updateStatus(orderB.id, OrderStatus.Completed, admin.id);
       const stockAfterB = await sumStock(wh1.id, prod.id);
+      const statusB = (await prisma.stockOrder.findUnique({ where: { id: orderB.id } }))?.status;
 
       expect(stockAfterB).toBe(stockAfterA);
-
-      const recA = await prisma.stockOrder.findUnique({ where: { id: orderA.id } });
-      const recB = await prisma.stockOrder.findUnique({ where: { id: orderB.id } });
-      expect(recA?.status).toBe(recB?.status);
+      expect(statusB).toBe(statusA);
     });
   });
 });
