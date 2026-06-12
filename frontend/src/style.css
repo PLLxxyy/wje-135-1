@@ -1,0 +1,262 @@
+:root {
+  color: #203338;
+  background: #edf2f1;
+  font-family: "Avenir Next", "PingFang SC", "Microsoft YaHei", sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+}
+
+.app-shell {
+  min-height: 100vh;
+}
+
+.side-nav {
+  background: #17373a;
+  color: #eef6f3;
+  border-right: 1px solid #0f282a;
+}
+
+.brand {
+  height: 84px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 22px;
+}
+
+.brand > span {
+  width: 42px;
+  height: 42px;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  background: #d8a642;
+  color: #17373a;
+  font-weight: 800;
+}
+
+.brand strong,
+.brand small {
+  display: block;
+}
+
+.brand small {
+  color: #aec4c4;
+}
+
+.side-nav .el-menu {
+  border-right: none;
+  background: transparent;
+}
+
+.side-nav .el-menu-item {
+  color: #d9e7e4;
+}
+
+.side-nav .el-menu-item.is-active {
+  background: #244d50;
+  color: #ffffff;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: #fbfcfb;
+  border-bottom: 1px solid #d8e2e0;
+}
+
+.topbar b,
+.topbar span {
+  display: block;
+}
+
+.topbar span {
+  color: #66777c;
+  font-size: 13px;
+}
+
+.el-main {
+  padding: 24px;
+}
+
+.panel,
+.warehouse-card,
+.metric-strip article {
+  background: #fbfcfb;
+  border: 1px solid #d7e1df;
+  border-radius: 8px;
+  padding: 18px;
+}
+
+.panel-title {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.panel-title h2 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.page-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(320px, 0.75fr);
+  gap: 18px;
+}
+
+.wide {
+  grid-column: span 1;
+}
+
+.metric-strip {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 18px;
+}
+
+.metric-strip span {
+  color: #637279;
+}
+
+.metric-strip strong {
+  display: block;
+  font-size: 32px;
+  margin-top: 6px;
+}
+
+.chart {
+  height: 320px;
+}
+
+.stack {
+  display: grid;
+  gap: 10px;
+}
+
+.split-page,
+.product-page,
+.order-page {
+  display: grid;
+  gap: 18px;
+}
+
+.split-page {
+  grid-template-columns: 390px minmax(0, 1fr);
+}
+
+.warehouse-list {
+  display: grid;
+  gap: 12px;
+}
+
+.warehouse-card {
+  cursor: pointer;
+}
+
+.warehouse-card.active {
+  border-color: #2f6f73;
+  box-shadow: inset 4px 0 0 #2f6f73;
+}
+
+.warehouse-card p {
+  color: #62747a;
+  margin: 0 0 14px;
+}
+
+.warehouse-card dl {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  margin: 0 0 12px;
+}
+
+.warehouse-card dt {
+  color: #637279;
+}
+
+.warehouse-card dd {
+  margin: 0;
+  font-weight: 700;
+}
+
+.shelf-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 12px;
+}
+
+.shelf-cell {
+  padding: 14px;
+  border: 1px solid #d9e3e7;
+  border-radius: 8px;
+  background: #f8fbfb;
+}
+
+.shelf-cell strong,
+.shelf-cell span,
+.shelf-cell small {
+  display: block;
+  margin-bottom: 8px;
+}
+
+.shelf-cell span,
+.shelf-cell small {
+  color: #637279;
+}
+
+.product-page {
+  grid-template-columns: 240px minmax(0, 1fr) 360px;
+}
+
+.toolbar,
+.order-item {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.order-page {
+  grid-template-columns: minmax(0, 1.2fr) minmax(360px, 0.8fr);
+}
+
+.order-page .panel:last-child {
+  grid-column: 1 / -1;
+}
+
+@media (max-width: 1100px) {
+  .side-nav {
+    width: 210px !important;
+  }
+  .page-grid,
+  .split-page,
+  .product-page,
+  .order-page {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 760px) {
+  .app-shell {
+    display: block;
+  }
+  .side-nav {
+    width: 100% !important;
+  }
+  .metric-strip {
+    grid-template-columns: 1fr;
+  }
+  .toolbar,
+  .order-item {
+    flex-direction: column;
+  }
+}

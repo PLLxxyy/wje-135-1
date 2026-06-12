@@ -1,0 +1,16 @@
+model Product {
+  id            String  @id @default(cuid())
+  name          String
+  sku           String  @unique
+  categoryId    String
+  spec          String
+  unit          String
+  weight        Decimal @db.Decimal(10, 3)
+  volume        Decimal @db.Decimal(10, 3)
+  barcode       String  @unique
+  minStock      Int
+  maxStock      Int
+  shelfLifeDays Int?
+  imageUrl      String?
+  price         Decimal @db.Decimal(10, 2)
+}

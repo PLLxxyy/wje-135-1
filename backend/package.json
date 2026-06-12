@@ -1,0 +1,38 @@
+{
+  "name": "warehouse-stock-backend",
+  "version": "1.0.0",
+  "private": true,
+  "type": "commonjs",
+  "scripts": {
+    "dev": "ts-node-dev --respawn --transpile-only src/server.ts",
+    "build": "tsc",
+    "start": "node dist/server.js",
+    "prisma:generate": "prisma generate --schema src/prisma/schema.prisma",
+    "prisma:push": "prisma db push --schema src/prisma/schema.prisma",
+    "seed": "ts-node src/prisma/seeds/seed.ts",
+    "seed:prod": "node dist/prisma/seeds/seed.js"
+  },
+  "dependencies": {
+    "@prisma/client": "^5.22.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "jsonwebtoken": "^9.0.2",
+    "morgan": "^1.10.0",
+    "prisma": "^5.22.0"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.17",
+    "@types/express": "^4.17.21",
+    "@types/jsonwebtoken": "^9.0.7",
+    "@types/morgan": "^1.9.9",
+    "@types/node": "^22.10.2",
+    "ts-node": "^10.9.2",
+    "ts-node-dev": "^2.0.0",
+    "typescript": "^5.7.2"
+  },
+  "prisma": {
+    "schema": "src/prisma/schema.prisma",
+    "seed": "node dist/prisma/seeds/seed.js"
+  }
+}

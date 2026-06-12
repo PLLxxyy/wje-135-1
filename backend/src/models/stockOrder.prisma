@@ -1,0 +1,11 @@
+model StockOrder {
+  id                String      @id @default(cuid())
+  orderNo           String      @unique
+  type              OrderType
+  sourceWarehouseId String?
+  targetWarehouseId String?
+  status            OrderStatus @default(Draft)
+  createdById       String
+  approvedById      String?
+  remark            String?
+}

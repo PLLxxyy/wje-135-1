@@ -1,0 +1,12 @@
+model StockRecord {
+  id                String        @id @default(cuid())
+  productId         String
+  warehouseId       String
+  shelfId           String?
+  batchNo           String
+  quantity          Int
+  inboundDate       DateTime
+  expiryDate        DateTime?
+  lastOperationType OperationType @default(Inbound)
+  lastOperationAt   DateTime      @default(now())
+}

@@ -1,0 +1,8 @@
+model StockOrderItem {
+  id             String @id @default(cuid())
+  orderId        String
+  productId      String
+  shelfId        String?
+  quantity       Int
+  actualQuantity Int?
+}
